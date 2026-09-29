@@ -776,6 +776,11 @@ with tabs[3]:
                     "cantidad": 1,
                     "unidadEntrega": "GLB",
                     "tiempoTexto": "1 día",
+                    "redondear": False,
+                    "modoRedondeo": "valor",
+                    "valorRedondeado": 0,
+                    "multiploRedondeo": 10000,
+                    "direccionRedondeo": "cercano",
                     "filas": [],
                 }
                 state["items"].append(nuevo)
@@ -805,6 +810,11 @@ with tabs[3]:
                     "cantidad": orig.get("cantidad", 1),
                     "unidadEntrega": orig.get("unidadEntrega", "GLB"),
                     "tiempoTexto": orig.get("tiempoTexto", "1 día"),
+                    "redondear": bool(orig.get("redondear", False)),
+                    "modoRedondeo": orig.get("modoRedondeo", "valor"),
+                    "valorRedondeado": orig.get("valorRedondeado", 0),
+                    "multiploRedondeo": orig.get("multiploRedondeo", 10000),
+                    "direccionRedondeo": orig.get("direccionRedondeo", "cercano"),
                     "filas": filas_copia,
                 }
                 state["items"].append(duplicado)
@@ -909,16 +919,101 @@ with tabs[3]:
                     })
                     st.rerun()
 
+        calc_pre = calc_item(active_item, state)
+        venta_apu_base = calc_pre.get("ventaBase", calc_pre["venta"])
+
+        with st.container(border=True):
+            st.markdown("##### 🎯 Redondear o fijar precio del ítem a un valor X")
+            r_col1, r_col2, r_col3 = st.columns([1.4, 1.7, 2.5])
+            with r_col1:
+                active_item["redondear"] = st.checkbox(
+                    "Activar redondeo de precio en este ítem",
+                    value=bool(active_item.get("redondear", False)),
+                    key=f"it_red_chk_{active_item['id']}",
+                )
+                st.caption(f"Valor APU sin redondear: **{fmt_cop(venta_apu_base)}**")
+            if active_item["redondear"]:
+                with r_col2:
+                    modo_actual_red = active_item.get("modoRedondeo", "valor")
+                    if modo_actual_red not in ("valor", "multiplo"):
+                        modo_actual_red = "valor"
+                    active_item["modoRedondeo"] = st.radio(
+                        "Tipo de redondeo",
+                        options=["valor", "multiplo"],
+                        index=0 if modo_actual_red == "valor" else 1,
+                        format_func=lambda m: "✏️ Redondear / Fijar a valor exacto ($ X)" if m == "valor" else "🔢 Redondear a múltiplo de $ X",
+                        key=f"it_red_mod_{active_item['id']}",
+                    )
+                with r_col3:
+                    if active_item["modoRedondeo"] == "valor":
+                        val_guardado = int(active_item.get("valorRedondeado", 0) or 0)
+                        if val_guardado <= 0 and venta_apu_base > 0:
+                            val_guardado = int(round(venta_apu_base / 10000.0) * 10000)
+                            active_item["valorRedondeado"] = val_guardado
+                        active_item["valorRedondeado"] = st.number_input(
+                            "Precio redondeado del ítem ($ COP)",
+                            value=val_guardado,
+                            min_value=0,
+                            step=10000,
+                            key=f"it_red_val_{active_item['id']}",
+                        )
+                        qb1, qb2, qb3 = st.columns(3)
+                        if qb1.button("Redondear a $10.000", key=f"qb10_{active_item['id']}", use_container_width=True):
+                            v_r = int(round(venta_apu_base / 10000.0) * 10000)
+                            active_item["valorRedondeado"] = v_r
+                            st.session_state[f"it_red_val_{active_item['id']}"] = v_r
+                            st.rerun()
+                        if qb2.button("Redondear a $50.000", key=f"qb50_{active_item['id']}", use_container_width=True):
+                            v_r = int(round(venta_apu_base / 50000.0) * 50000)
+                            active_item["valorRedondeado"] = v_r
+                            st.session_state[f"it_red_val_{active_item['id']}"] = v_r
+                            st.rerun()
+                        if qb3.button("Redondear a $100.000", key=f"qb100_{active_item['id']}", use_container_width=True):
+                            v_r = int(round(venta_apu_base / 100000.0) * 100000)
+                            active_item["valorRedondeado"] = v_r
+                            st.session_state[f"it_red_val_{active_item['id']}"] = v_r
+                            st.rerun()
+                    else:
+                        mc_a, mc_b = st.columns(2)
+                        active_item["multiploRedondeo"] = mc_a.number_input(
+                            "Redondear a múltiplo de ($)",
+                            value=int(active_item.get("multiploRedondeo", 10000) or 10000),
+                            min_value=100,
+                            step=1000,
+                            key=f"it_red_mul_{active_item['id']}",
+                        )
+                        dir_act = active_item.get("direccionRedondeo", "cercano")
+                        if dir_act not in ("cercano", "arriba", "abajo"):
+                            dir_act = "cercano"
+                        active_item["direccionRedondeo"] = mc_b.selectbox(
+                            "Dirección del redondeo",
+                            options=["cercano", "arriba", "abajo"],
+                            index=["cercano", "arriba", "abajo"].index(dir_act),
+                            format_func=lambda d: {"cercano": "Al más cercano", "arriba": "Hacia arriba (↑)", "abajo": "Hacia abajo (↓)"}[d],
+                            key=f"it_red_dir_{active_item['id']}",
+                        )
+
         calc = calc_item(active_item, state)
+        venta_base_m = calc.get("ventaBase", calc["venta"])
+        dif_red = calc["venta"] - venta_base_m
         m_ef_apu = calc_margen_efectivo(state["p"])
-        m_c1, m_c2, m_c3 = st.columns(3)
+        cant_it = float(active_item.get("cantidad", 1) or 1)
+        m_c1, m_c2, m_c3, m_c4 = st.columns(4)
         m_c1.metric("Costo Directo Base del Ítem", fmt_cop(calc["total"]))
         m_c2.metric(
-            f"Margen ({m_ef_apu['margenBase']*100:.2f}%) + Impuestos ({m_ef_apu['impuestos']*100:.3f}%)",
-            fmt_cop(calc["venta"] - calc["total"]),
-            delta=f"Total: {m_ef_apu['totalPct']*100:.3f}%",
+            f"Venta APU ({m_ef_apu['totalPct']*100:.2f}%)",
+            fmt_cop(venta_base_m),
+            delta=f"Margen+Imp: {fmt_cop(venta_base_m - calc['total'])}",
         )
-        m_c3.metric("Costo Total / Venta del Ítem en APU", fmt_cop(calc["venta"]))
+        m_c3.metric(
+            "Precio Unitario Final (Ofertado)",
+            fmt_cop(calc["venta"]),
+            delta=f"Ajuste redondeo: {fmt_cop(dif_red)}" if active_item.get("redondear") else "Sin redondeo activo",
+        )
+        m_c4.metric(
+            f"Precio Total Ítem (× {cant_it:g} {active_item.get('unidadEntrega', 'GLB')})",
+            fmt_cop(round(calc["venta"] * cant_it)),
+        )
 
 # ================= TAB 5: RESUMEN Y OFERTA =================
 with tabs[4]:
@@ -1573,8 +1668,5 @@ with tabs[7]:
       </div>
     </div>
     """
-    st.markdown(informe_html, unsafe_allow_html=True)
-
-
     st.markdown(informe_html, unsafe_allow_html=True)
 
