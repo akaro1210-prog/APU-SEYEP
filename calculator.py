@@ -2,6 +2,7 @@
 calculator.py — Motor matemático de cálculo APU (replica exactamente la lógica del Excel/HTML).
 Incluye el cálculo detallado de Dotación / EPP anual y mensual por perfil RRHH.
 """
+import math
 from state import CATS, get_catalogo_base_dotacion
 
 
@@ -223,7 +224,7 @@ def calc_row(row: dict, state: dict) -> dict:
 def calc_item(item: dict, state: dict) -> dict:
     por_cat = {c: {"total": 0, "venta": 0} for c in CATS}
     total = 0
-    venta = 0
+    venta_base = 0
 
     for row in item.get("filas", []):
         res = calc_row(row, state)
@@ -237,9 +238,33 @@ def calc_item(item: dict, state: dict) -> dict:
         por_cat[cat]["total"] += res["total"]
         por_cat[cat]["venta"] += res["venta"]
         total += res["total"]
-        venta += res["venta"]
+        venta_base += res["venta"]
 
-    return {"porCat": por_cat, "total": total, "venta": venta}
+    venta = venta_base
+    if bool(item.get("redondear", False)):
+        modo_red = item.get("modoRedondeo", "valor")
+        if modo_red == "multiplo":
+            mult = float(item.get("multiploRedondeo", 10000) or 0)
+            if mult > 0:
+                dir_red = item.get("direccionRedondeo", "cercano")
+                if dir_red == "arriba":
+                    venta = int(math.ceil(venta_base / mult) * mult)
+                elif dir_red == "abajo":
+                    venta = int(math.floor(venta_base / mult) * mult)
+                else:
+                    venta = int(round(venta_base / mult) * mult)
+        else:
+            val_manual = float(item.get("valorRedondeado", 0) or 0)
+            if val_manual > 0:
+                venta = round(val_manual)
+
+    return {
+        "porCat": por_cat,
+        "total": total,
+        "ventaBase": venta_base,
+        "venta": venta,
+        "diferenciaRedondeo": venta - venta_base,
+    }
 
 
 def calc_resumen_general(state: dict) -> dict:
@@ -422,5 +447,6 @@ if __name__ == "__main__":
         )
     except Exception:
         pass
+
 
 
