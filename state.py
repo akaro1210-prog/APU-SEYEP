@@ -413,6 +413,11 @@ def get_default_state() -> dict:
                 "cantidad": 1,
                 "unidadEntrega": "GLB",
                 "tiempoTexto": "5 días hábiles",
+                "redondear": False,
+                "modoRedondeo": "valor",
+                "valorRedondeado": 0,
+                "multiploRedondeo": 10000,
+                "direccionRedondeo": "cercano",
                 "filas": [],
             },
             {
@@ -421,6 +426,11 @@ def get_default_state() -> dict:
                 "cantidad": 1,
                 "unidadEntrega": "GLB",
                 "tiempoTexto": "3 días hábiles",
+                "redondear": False,
+                "modoRedondeo": "valor",
+                "valorRedondeado": 0,
+                "multiploRedondeo": 10000,
+                "direccionRedondeo": "cercano",
                 "filas": [],
             },
         ],
@@ -509,3 +519,15 @@ def init_session_state():
 def next_id() -> int:
     st.session_state["apu_state"]["uid"] += 1
     return st.session_state["apu_state"]["uid"]
+
+
+if __name__ == "__main__":
+    try:
+        st.warning(
+            "⚠️ Estás ejecutando `state.py` directamente. "
+            "Para abrir el Cotizador APU debes ejecutar **`app.py`** "
+            "(y verificar que cada archivo `.py` tenga su propio contenido y esté guardado con Ctrl + S)."
+        )
+    except Exception:
+        pass
+
