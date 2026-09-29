@@ -17,6 +17,7 @@ from state import (
     get_catalogo_base_recursos,
     init_session_state,
     next_id,
+    normalize_loaded_state,
 )
 from calculator import (
     costo_rrhh,
@@ -44,10 +45,75 @@ st.set_page_config(
 init_session_state()
 state = st.session_state["apu_state"]
 
-col_title, col_pdf_a, col_pdf_b = st.columns([3.5, 1.2, 1.2])
+
+def _sync_widgets_from_loaded_state(st_data: dict):
+    """Sincroniza todas las llaves de widgets de Streamlit tras cargar un archivo .json de cotización."""
+    cot = st_data.get("cot", {})
+    st.session_state["fa_cli"] = cot.get("cliente", "")
+    st.session_state["fa_tit"] = cot.get("ofertaTitulo", "")
+    st.session_state["fa_ref"] = cot.get("referencia", "")
+    st.session_state["fb_ref"] = cot.get("referencia", "")
+    st.session_state["fa_fec"] = cot.get("fecha", "")
+    st.session_state["fb_fec"] = cot.get("fecha", "")
+    st.session_state["fa_eco_intro"] = cot.get("ofertaEconomicaIntro", "")
+    st.session_state["fb_sen"] = cot.get("senores", "")
+    st.session_state["fb_nit"] = cot.get("nit", "")
+    st.session_state["fb_tra"] = cot.get("trabajo", "")
+    st.session_state["fb_alc"] = cot.get("alcanceRapido", "")
+    st.session_state["fb_obs"] = cot.get("observacionesRapido", "")
+    st.session_state["fb_tit_tab"] = cot.get("tituloTablaRapido", "OFERTA ECONÓMICA RUTA ACOMETIDA No.2")
+    st.session_state["fb_chk_rete"] = bool(cot.get("mostrarReteRapido", False))
+    st.session_state["fb_cos_nota"] = cot.get("costosNotaRapido", "")
+    st.session_state["fb_cond"] = cot.get("condicionesRapido", "")
+    modo = cot.get("modoTablaOferta", "individual")
+    for k in (
+        "modo_tabla_oferta_tab_apu",
+        "modo_tabla_oferta_tab_resumen",
+        "modo_tabla_oferta_tab_fmt_a",
+        "modo_tabla_oferta_tab_fmt_b",
+    ):
+        st.session_state[k] = modo
+
+
+def _on_load_project_json(uploader_key: str):
+    """Callback ejecutado cuando el usuario selecciona un archivo .json guardado para abrirlo en el cotizador."""
+    up_file = st.session_state.get(uploader_key)
+    if up_file is None:
+        return
+    try:
+        raw_text = up_file.getvalue().decode("utf-8")
+        parsed = json.loads(raw_text)
+        normalized = normalize_loaded_state(parsed)
+        st.session_state["apu_state"] = normalized
+        _sync_widgets_from_loaded_state(normalized)
+        ref = normalized.get("cot", {}).get("referencia", "")
+        cli = normalized.get("cot", {}).get("cliente", "")
+        st.session_state["json_load_status"] = (
+            "ok",
+            f"✅ Cotización cargada correctamente: Referencia {ref} — Cliente {cli} ({up_file.name})",
+        )
+    except Exception as exc:
+        st.session_state["json_load_status"] = (
+            "error",
+            f"❌ No se pudo cargar el archivo JSON ({up_file.name}): {exc}",
+        )
+
+
+col_title, col_save_json, col_pdf_a, col_pdf_b = st.columns([2.8, 1.3, 1.15, 1.15])
 with col_title:
     st.title("🧮 Cotizador APU — SEYEP SAS")
     st.caption("Herramienta de Análisis de Precios Unitarios y Generación Directa de Cotizaciones en PDF")
+with col_save_json:
+    st.write("")
+    ref_slug = (state["cot"].get("referencia") or "SEYEP").strip().replace(" ", "_")
+    cli_slug = (state["cot"].get("cliente") or "Cliente").strip().replace(" ", "_")
+    st.download_button(
+        label="💾 Guardar Cotización (.json)",
+        data=json.dumps(state, indent=2, ensure_ascii=False),
+        file_name=f"Cotizacion_{ref_slug}_{cli_slug}.json",
+        mime="application/json",
+        use_container_width=True,
+    )
 with col_pdf_a:
     st.write("")
     st.download_button(
@@ -67,6 +133,35 @@ with col_pdf_b:
         type="primary",
         use_container_width=True,
     )
+
+with st.expander("📂 Cargar o Guardar archivo de cotización (.json) — Para retomar cotizaciones o analizar descuentos", expanded=False):
+    j_col1, j_col2 = st.columns([2, 1])
+    with j_col1:
+        st.file_uploader(
+            "Selecciona un archivo de cotización (.json) guardado previamente para cargarlo en el cotizador",
+            type=["json"],
+            key="up_project_json_top",
+            on_change=_on_load_project_json,
+            args=("up_project_json_top",),
+        )
+    with j_col2:
+        st.markdown("**Guardar copia actual**")
+        st.caption("Descarga un archivo `.json` con todos los ítems, APU, salarios, márgenes y textos para abrirlo cuando el cliente solicite ajustes o descuentos.")
+        st.download_button(
+            label=f"⬇️ Descargar Cotización_{ref_slug}_{cli_slug}.json",
+            data=json.dumps(state, indent=2, ensure_ascii=False),
+            file_name=f"Cotizacion_{ref_slug}_{cli_slug}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="dl_json_expander",
+        )
+
+if "json_load_status" in st.session_state:
+    kind, msg = st.session_state["json_load_status"]
+    if kind == "ok":
+        st.success(msg)
+    else:
+        st.error(msg)
 
 tabs = st.tabs([
     "⚙️ 1. Parámetros",
@@ -1302,5 +1397,7 @@ with tabs[7]:
     </div>
     """
     st.markdown(informe_html, unsafe_allow_html=True)
+
+w_html=True)
 
 
