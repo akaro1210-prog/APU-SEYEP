@@ -1398,6 +1398,3 @@ with tabs[7]:
     """
     st.markdown(informe_html, unsafe_allow_html=True)
 
-w_html=True)
-
-
