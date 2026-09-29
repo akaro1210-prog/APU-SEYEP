@@ -1,15 +1,36 @@
 """
 app.py — Punto de entrada principal de la aplicación Streamlit para el Cotizador APU.
-Ejecución: streamlit run app.py
+Ejecución: py -m streamlit run app.py  (o presionando ▶ Run en VS Code)
 """
+import os
+import sys
+import subprocess
 import base64
 import json
 import pandas as pd
 import streamlit as st
+
+# Si se ejecuta presionando el botón "▶ Run Python File" de Visual Studio Code
+# (que corre `python app.py` en lugar de `streamlit run app.py`),
+# relanzamos automáticamente el servidor de Streamlit usando el mismo intérprete:
+if __name__ == "__main__":
+    try:
+        from streamlit.runtime import exists as _st_runtime_exists
+        _is_running_in_streamlit = _st_runtime_exists()
+    except Exception:
+        _is_running_in_streamlit = True
+
+    if not _is_running_in_streamlit and os.environ.get("SEYEP_ST_BOOTSTRAPPED") != "1":
+        _env = os.environ.copy()
+        _env["SEYEP_ST_BOOTSTRAPPED"] = "1"
+        _script_path = os.path.abspath(__file__)
+        raise SystemExit(
+            subprocess.call([sys.executable, "-m", "streamlit", "run", _script_path], env=_env)
+        )
+
+import state as _state_mod
 from state import (
     CATS,
-    INTRO_ECO_CONSOLIDADA,
-    INTRO_ECO_INDIVIDUAL,
     SECCIONES_RECURSOS,
     UNIDADES,
     build_dotacion_perfil_from_catalogo,
@@ -17,8 +38,21 @@ from state import (
     get_catalogo_base_recursos,
     init_session_state,
     next_id,
-    normalize_loaded_state,
 )
+
+INTRO_ECO_INDIVIDUAL = getattr(
+    _state_mod,
+    "INTRO_ECO_INDIVIDUAL",
+    "En las siguientes tablas se relaciona el valor de las actividades descritas en la oferta técnica de manera individual:",
+)
+INTRO_ECO_CONSOLIDADA = getattr(
+    _state_mod,
+    "INTRO_ECO_CONSOLIDADA",
+    "En la siguiente tabla se relaciona el valor de las actividades descritas en la oferta técnica:",
+)
+normalize_loaded_state = getattr(_state_mod, "normalize_loaded_state", lambda data: data)
+
+import calculator as _calc_mod
 from calculator import (
     costo_rrhh,
     costo_recurso,
@@ -28,12 +62,82 @@ from calculator import (
     calc_item,
     calc_margen_efectivo,
     calc_resumen_general,
-    calc_informe_gm,
     fmt_cop,
     fmt_pct,
-    fmt_num_informe,
-    fmt_pct_informe,
 )
+
+fmt_num_informe = getattr(
+    _calc_mod,
+    "fmt_num_informe",
+    lambda val, dash_if_zero=True: " -" if (dash_if_zero and abs(float(val or 0)) < 0.005) else f"{round(float(val or 0)):,}".replace(",", "."),
+)
+fmt_pct_informe = getattr(
+    _calc_mod,
+    "fmt_pct_informe",
+    lambda val: f"{float(val or 0) * 100:.1f}%".replace(".", ","),
+)
+def _fallback_calc_informe_gm(st_data: dict) -> dict:
+    p = st_data["p"]
+    resumen = calc_resumen_general(st_data)
+    m_ef = calc_margen_efectivo(p)
+    plazo_meses = float(p.get("proyecto", {}).get("plazoMeses", 1) or 1)
+    if plazo_meses <= 0:
+        plazo_meses = 1.0
+    valor_total_antes_iva = float(resumen["subtotal"])
+    valor_mensual_antes_iva = round(valor_total_antes_iva / plazo_meses)
+    iva_pct = float(p.get("iva", 0.19) or 0)
+    iva_val = float(resumen["iva"])
+    valor_con_iva = float(resumen["conIva"])
+    ingresos_op = valor_total_antes_iva
+    costo_op_total = float(sum(round(it["costoDirectoTotal"]) for it in resumen["items"]))
+    gm_val = ingresos_op - costo_op_total
+    gm_pct = (gm_val / ingresos_op) if ingresos_op > 0 else m_ef["totalPct"]
+    ica_pct = float(p.get("ica", 0.00966) or 0.0) if p.get("aplicaIca", False) else 0.0
+    rete_iva_pct = float(p.get("reteIva", 0.0285) or 0.0) if p.get("aplicaReteIva", False) else 0.0
+    rete_ica_pct = float(p.get("reteIca", 0.00966) or 0.0) if p.get("aplicaReteIca", False) else 0.0
+    cuatro_mil_pct = float(p.get("cuatroPorMil", 0.004) or 0.0) if p.get("aplica4x1000", True) else 0.0
+    otros_gastos_pct = ica_pct + rete_iva_pct + rete_ica_pct + cuatro_mil_pct
+    otros_gastos_val = round(ingresos_op * otros_gastos_pct)
+    imp_renta_pct = float(p.get("rte", 0.11) or 0.0) if p.get("aplicaRte", True) else 0.0
+    imp_renta_val = round(ingresos_op * imp_renta_pct)
+    utilidad_val = gm_val - (otros_gastos_val + imp_renta_val)
+    utilidad_pct = (utilidad_val / ingresos_op) if ingresos_op > 0 else m_ef["margenBase"]
+    total_meses_str = str(int(plazo_meses)) if abs(plazo_meses - round(plazo_meses)) < 1e-6 else f"{plazo_meses:.1f}".replace(".", ",")
+    return {
+        "valorMensualAntesIva": valor_mensual_antes_iva,
+        "totalMesesStr": total_meses_str,
+        "valorTotalAntesIva": valor_total_antes_iva,
+        "ivaPct": iva_pct,
+        "ivaVal": iva_val,
+        "valorConIva": valor_con_iva,
+        "ingresosOp": ingresos_op,
+        "costoOpTotal": costo_op_total,
+        "gmVal": gm_val,
+        "gmPct": gm_pct,
+        "polizasPct": 0.0,
+        "polizasVal": 0.0,
+        "otrosGastosPct": otros_gastos_pct,
+        "otrosGastosVal": otros_gastos_val,
+        "interesesPct": 0.0,
+        "interesesVal": 0.0,
+        "impRentaPct": imp_renta_pct,
+        "impRentaVal": imp_renta_val,
+        "otrosImpPct": 0.0,
+        "otrosImpVal": 0.0,
+        "estructuraPct": 0.0,
+        "estructuraVal": 0.0,
+        "gestionPct": 0.0,
+        "gestionVal": 0.0,
+        "amortizacionPct": 0.0,
+        "amortizacionVal": 0.0,
+        "utilidadVal": utilidad_val,
+        "utilidadPct": utilidad_pct,
+        "kOfertado": (ingresos_op / costo_op_total) if costo_op_total > 0 else 0.0,
+    }
+
+
+calc_informe_gm = getattr(_calc_mod, "calc_informe_gm", _fallback_calc_informe_gm)
+
 from pdf_generator import generar_pdf_formato_a, generar_pdf_formato_b
 
 st.set_page_config(
@@ -47,7 +151,26 @@ state = st.session_state["apu_state"]
 
 
 def _sync_widgets_from_loaded_state(st_data: dict):
-    """Sincroniza todas las llaves de widgets de Streamlit tras cargar un archivo .json de cotización."""
+    """Limpia y sincroniza todas las llaves de widgets de Streamlit tras cargar un archivo .json de cotización."""
+    prefixes_to_clear = (
+        "rrhh_",
+        "rec_",
+        "it_",
+        "f_",
+        "op_",
+        "ad_",
+        "chk_p_",
+        "cnt_p_",
+        "dot_meses_perf_",
+        "sec_",
+        "fa_",
+        "fb_",
+        "modo_tabla_oferta_",
+    )
+    for k in list(st.session_state.keys()):
+        if k == "rte_sum_inp" or any(k.startswith(pref) for pref in prefixes_to_clear):
+            del st.session_state[k]
+
     cot = st_data.get("cot", {})
     st.session_state["fa_cli"] = cot.get("cliente", "")
     st.session_state["fa_tit"] = cot.get("ofertaTitulo", "")
@@ -81,7 +204,7 @@ def _on_load_project_json(uploader_key: str):
     if up_file is None:
         return
     try:
-        raw_text = up_file.getvalue().decode("utf-8")
+        raw_text = up_file.getvalue().decode("utf-8-sig")
         parsed = json.loads(raw_text)
         normalized = normalize_loaded_state(parsed)
         st.session_state["apu_state"] = normalized
@@ -90,26 +213,48 @@ def _on_load_project_json(uploader_key: str):
         cli = normalized.get("cot", {}).get("cliente", "")
         st.session_state["json_load_status"] = (
             "ok",
-            f"✅ Cotización cargada correctamente: Referencia {ref} — Cliente {cli} ({up_file.name})",
+            f"✅ Cotización abierta correctamente: Referencia {ref} — Cliente {cli} ({up_file.name})",
         )
     except Exception as exc:
         st.session_state["json_load_status"] = (
             "error",
-            f"❌ No se pudo cargar el archivo JSON ({up_file.name}): {exc}",
+            f"❌ No se pudo abrir el archivo JSON ({up_file.name}): {exc}",
         )
 
 
-col_title, col_save_json, col_pdf_a, col_pdf_b = st.columns([2.8, 1.3, 1.15, 1.15])
+ref_slug = (state["cot"].get("referencia") or "SEYEP").strip().replace(" ", "_")
+cli_slug = (state["cot"].get("cliente") or "Cliente").strip().replace(" ", "_")
+json_bytes_actual = json.dumps(state, indent=2, ensure_ascii=False)
+
+col_title, col_open_json, col_save_json, col_pdf_a, col_pdf_b = st.columns([2.1, 1.15, 1.15, 1.15, 1.15])
 with col_title:
     st.title("🧮 Cotizador APU — SEYEP SAS")
     st.caption("Herramienta de Análisis de Precios Unitarios y Generación Directa de Cotizaciones en PDF")
+with col_open_json:
+    st.write("")
+    if hasattr(st, "popover"):
+        with st.popover("📂 Abrir Cotización (.json)", use_container_width=True):
+            st.markdown("**📂 Abrir / Importar cotización guardada (`.json`)**")
+            st.caption("Selecciona el archivo `.json` que descargaste previamente para cargar todos sus ítems, APU, salarios y márgenes.")
+            st.file_uploader(
+                "Seleccionar archivo .json",
+                type=["json"],
+                key="up_project_json_pop",
+                on_change=_on_load_project_json,
+                args=("up_project_json_pop",),
+            )
+            if st.session_state.get("up_project_json_pop") is not None:
+                if st.button("✅ Recargar archivo seleccionado", key="btn_reload_pop", use_container_width=True, type="primary"):
+                    _on_load_project_json("up_project_json_pop")
+                    st.rerun()
+    else:
+        if st.button("📂 Abrir Cotización (.json)", use_container_width=True):
+            st.session_state["expand_json_panel"] = True
 with col_save_json:
     st.write("")
-    ref_slug = (state["cot"].get("referencia") or "SEYEP").strip().replace(" ", "_")
-    cli_slug = (state["cot"].get("cliente") or "Cliente").strip().replace(" ", "_")
     st.download_button(
         label="💾 Guardar Cotización (.json)",
-        data=json.dumps(state, indent=2, ensure_ascii=False),
+        data=json_bytes_actual,
         file_name=f"Cotizacion_{ref_slug}_{cli_slug}.json",
         mime="application/json",
         use_container_width=True,
@@ -134,11 +279,14 @@ with col_pdf_b:
         use_container_width=True,
     )
 
-with st.expander("📂 Cargar o Guardar archivo de cotización (.json) — Para retomar cotizaciones o analizar descuentos", expanded=False):
+with st.expander(
+    "📂 Abrir / Importar o Guardar archivo de cotización (.json) — Para retomar cotizaciones o analizar descuentos",
+    expanded=bool(st.session_state.get("expand_json_panel", False)),
+):
     j_col1, j_col2 = st.columns([2, 1])
     with j_col1:
         st.file_uploader(
-            "Selecciona un archivo de cotización (.json) guardado previamente para cargarlo en el cotizador",
+            "Selecciona un archivo de cotización (.json) guardado previamente para abrirlo en el cotizador",
             type=["json"],
             key="up_project_json_top",
             on_change=_on_load_project_json,
@@ -149,7 +297,7 @@ with st.expander("📂 Cargar o Guardar archivo de cotización (.json) — Para 
         st.caption("Descarga un archivo `.json` con todos los ítems, APU, salarios, márgenes y textos para abrirlo cuando el cliente solicite ajustes o descuentos.")
         st.download_button(
             label=f"⬇️ Descargar Cotización_{ref_slug}_{cli_slug}.json",
-            data=json.dumps(state, indent=2, ensure_ascii=False),
+            data=json_bytes_actual,
             file_name=f"Cotizacion_{ref_slug}_{cli_slug}.json",
             mime="application/json",
             use_container_width=True,
