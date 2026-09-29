@@ -411,3 +411,16 @@ def calc_informe_gm(state: dict) -> dict:
         "kOfertado": k_ofertado,
     }
 
+
+if __name__ == "__main__":
+    try:
+        import streamlit as _st
+        _st.warning(
+            "⚠️ Estás ejecutando `calculator.py` directamente. "
+            "Para abrir el Cotizador APU debes ejecutar **`app.py`** "
+            "(y verificar que cada archivo `.py` tenga su propio contenido y esté guardado con Ctrl + S)."
+        )
+    except Exception:
+        pass
+
+
