@@ -767,7 +767,7 @@ def render_selector_modo_tabla(state_obj: dict, suffix: str):
 # ================= TAB 4: ÍTEMS / APU =================
 with tabs[3]:
     with st.container(border=True):
-        col_btn1, col_btn2, col_modo = st.columns([1.4, 1.4, 4.2])
+        col_btn1, col_btn_dup, col_btn2, col_modo = st.columns([1.3, 1.35, 1.3, 3.8])
         with col_btn1:
             if st.button("+ Nuevo ítem a cotizar", type="primary", use_container_width=True):
                 nuevo = {
@@ -780,6 +780,35 @@ with tabs[3]:
                 }
                 state["items"].append(nuevo)
                 state["activeItem"] = nuevo["id"]
+                st.rerun()
+        with col_btn_dup:
+            if state["items"] and st.button("📋 Duplicar ítem actual", use_container_width=True):
+                orig = next((i for i in state["items"] if i["id"] == state.get("activeItem")), state["items"][0])
+                filas_copia = [
+                    {
+                        "id": next_id(),
+                        "cat": f.get("cat", "RECURSO HUMANO"),
+                        "tipo": f.get("tipo", "manual"),
+                        "ref": f.get("ref"),
+                        "nombreManual": f.get("nombreManual", ""),
+                        "costoManual": f.get("costoManual", 0),
+                        "unidad": f.get("unidad", "DIA"),
+                        "tiempo": f.get("tiempo", 1),
+                        "cant": f.get("cant", 1),
+                        "dedic": f.get("dedic", 1.0),
+                    }
+                    for f in orig.get("filas", [])
+                ]
+                duplicado = {
+                    "id": next_id(),
+                    "nombre": f"{orig.get('nombre', 'Ítem')} (Copia)",
+                    "cantidad": orig.get("cantidad", 1),
+                    "unidadEntrega": orig.get("unidadEntrega", "GLB"),
+                    "tiempoTexto": orig.get("tiempoTexto", "1 día"),
+                    "filas": filas_copia,
+                }
+                state["items"].append(duplicado)
+                state["activeItem"] = duplicado["id"]
                 st.rerun()
         with col_btn2:
             if state["items"] and st.button("✕ Eliminar ítem actual", use_container_width=True):
@@ -1544,5 +1573,8 @@ with tabs[7]:
       </div>
     </div>
     """
+    st.markdown(informe_html, unsafe_allow_html=True)
+
+
     st.markdown(informe_html, unsafe_allow_html=True)
 
