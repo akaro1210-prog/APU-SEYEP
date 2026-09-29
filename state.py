@@ -429,58 +429,81 @@ def get_default_state() -> dict:
     }
 
 
+def normalize_loaded_state(raw_state: dict) -> dict:
+    """
+    Normaliza y valida un diccionario de estado (cargado desde un archivo .json o en memoria),
+    restaurando claves enteras en diccionarios de ARL y dotación y completando valores por defecto.
+    """
+    defaults = get_default_state()
+    if not isinstance(raw_state, dict):
+        return defaults
+
+    state = raw_state
+    state.setdefault("uid", defaults["uid"])
+
+    p_def = defaults["p"]
+    p = state.setdefault("p", p_def)
+    proy_def = p_def["proyecto"]
+    proy = p.setdefault("proyecto", proy_def)
+    for k, v in proy_def.items():
+        proy.setdefault(k, v)
+
+    for k, v in p_def.items():
+        if k != "proyecto" and k != "arl":
+            p.setdefault(k, v)
+
+    raw_arl = p.get("arl", p_def["arl"])
+    if isinstance(raw_arl, dict):
+        p["arl"] = {int(k): float(v or 0.0) for k, v in raw_arl.items()}
+    else:
+        p["arl"] = dict(p_def["arl"])
+
+    cot_defaults = get_default_cot()
+    cot = state.setdefault("cot", {})
+    for k, v in cot_defaults.items():
+        cot.setdefault(k, v)
+
+    if "dotacionCatalogo" not in state or not state["dotacionCatalogo"]:
+        state["dotacionCatalogo"] = get_catalogo_base_dotacion()
+
+    cat_dot = state["dotacionCatalogo"]
+    for r in state.get("rrhh", []):
+        r.setdefault("tipoDotacion", "operativo" if r.get("dotacion") else "administrativo")
+        r.setdefault("dotacionMeses", int(p.get("dotacionMesesAnio", 12) or 12))
+        if "dotacionCantidades" not in r or not isinstance(r["dotacionCantidades"], dict):
+            r["dotacionCantidades"] = build_dotacion_perfil_from_catalogo(
+                cat_dot, r["tipoDotacion"] if r["tipoDotacion"] in ("operativo", "administrativo") else "operativo"
+            )
+        else:
+            norm_cant = {int(k): float(v or 0) for k, v in r["dotacionCantidades"].items()}
+            for item in cat_dot:
+                norm_cant.setdefault(int(item["id"]), 0.0)
+            r["dotacionCantidades"] = norm_cant
+
+    recs = state.get("recursos", [])
+    if not recs:
+        state["recursos"] = get_catalogo_base_recursos()
+    for r in state.get("recursos", []):
+        if not r.get("seccion") or r.get("seccion") == "EQUIPOS":
+            r["seccion"] = "EQUIPOS Y SOFTWARE"
+        elif r.get("seccion") == "SERVICIOS EXTERNOS/INTERNOS":
+            r["seccion"] = "SERVICIOS EXTERNOS"
+        r.setdefault("subgrupo", "")
+        r.setdefault("descripcion", "")
+        r.setdefault("unidadMedida", "UN")
+
+    if "items" not in state or not isinstance(state["items"], list) or len(state["items"]) == 0:
+        state["items"] = defaults["items"]
+    state.setdefault("activeItem", state["items"][0]["id"])
+
+    return state
+
+
 def init_session_state():
     if "apu_state" not in st.session_state:
         st.session_state["apu_state"] = get_default_state()
     else:
-        state = st.session_state["apu_state"]
-        p = state.get("p", {})
-        if "ica" not in p:
-            p["margen"] = 0.17
-            p["ica"] = 0.00966
-            p["aplicaIca"] = False
-            p["reteIva"] = 0.0285
-            p["aplicaReteIva"] = False
-            p["reteIca"] = 0.00966
-            p["aplicaReteIca"] = False
-            p["cuatroPorMil"] = 0.004
-            p["aplica4x1000"] = True
-        p.setdefault("aplicaRte", True)
-        p.setdefault("dotacionMesesAnio", 12)
-
-        cot_defaults = get_default_cot()
-        cot = state.setdefault("cot", {})
-        for k, v in cot_defaults.items():
-            cot.setdefault(k, v)
-
-        if "dotacionCatalogo" not in state or not state["dotacionCatalogo"]:
-            state["dotacionCatalogo"] = get_catalogo_base_dotacion()
-
-        cat_dot = state["dotacionCatalogo"]
-        for r in state.get("rrhh", []):
-            r.setdefault("tipoDotacion", "operativo" if r.get("dotacion") else "administrativo")
-            r.setdefault("dotacionMeses", int(p.get("dotacionMesesAnio", 12) or 12))
-            if "dotacionCantidades" not in r or not isinstance(r["dotacionCantidades"], dict):
-                r["dotacionCantidades"] = build_dotacion_perfil_from_catalogo(
-                    cat_dot, r["tipoDotacion"] if r["tipoDotacion"] in ("operativo", "administrativo") else "operativo"
-                )
-            else:
-                norm_cant = {int(k): float(v or 0) for k, v in r["dotacionCantidades"].items()}
-                for item in cat_dot:
-                    norm_cant.setdefault(int(item["id"]), 0.0)
-                r["dotacionCantidades"] = norm_cant
-
-        recs = state.get("recursos", [])
-        if len(recs) < 25:
-            state["recursos"] = get_catalogo_base_recursos()
-        for r in state.get("recursos", []):
-            if not r.get("seccion") or r.get("seccion") == "EQUIPOS":
-                r["seccion"] = "EQUIPOS Y SOFTWARE"
-            elif r.get("seccion") == "SERVICIOS EXTERNOS/INTERNOS":
-                r["seccion"] = "SERVICIOS EXTERNOS"
-            r.setdefault("subgrupo", "")
-            r.setdefault("descripcion", "")
-            r.setdefault("unidadMedida", "UN")
+        st.session_state["apu_state"] = normalize_loaded_state(st.session_state["apu_state"])
 
 
 def next_id() -> int:
