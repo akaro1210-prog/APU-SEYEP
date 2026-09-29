@@ -939,3 +939,16 @@ def generar_pdf_formato_b(
     pdf.rect(box_x, y_cond_start, box_w, y_cond_end - y_cond_start)
 
     return bytes(pdf.output())
+
+
+if __name__ == "__main__":
+    try:
+        import streamlit as _st
+        _st.warning(
+            "⚠️ Estás ejecutando `pdf_generator.py` directamente. "
+            "Para abrir el Cotizador APU debes ejecutar **`app.py`** "
+            "(y verificar que cada archivo `.py` tenga su propio contenido y esté guardado con Ctrl + S)."
+        )
+    except Exception:
+        pass
+
